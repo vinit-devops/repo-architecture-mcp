@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repo-architecture-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for analyzing GitHub repositories and generating architectural diagrams"
 authors = [
     {name = "Vinit Kumar", email = "k.vinit2020@gmail.com"}
