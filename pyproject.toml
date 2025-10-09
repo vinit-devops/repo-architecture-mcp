@@ -7,7 +7,7 @@ name = "repo-architecture-mcp-server"
 version = "0.1.0"
 description = "MCP server for analyzing GitHub repositories and generating architectural diagrams"
 authors = [
-    {name = "Developer", email = "developer@example.com"}
+    {name = "Vinit Kumar", email = "k.vinit2020@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
