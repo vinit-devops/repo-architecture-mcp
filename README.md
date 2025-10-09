@@ -113,9 +113,9 @@ repo-architecture-mcp --analyze-local /path/to/project
 }
 ```
 
-### For Kiro IDE
+### For Cursor IDE
 
-**Workspace Configuration for Local Analysis** (`.kiro/settings/mcp.json`):
+**Workspace Configuration for Local Analysis** (`.cursor/settings/mcp.json`):
 ```json
 {
   "mcpServers": {
@@ -132,7 +132,7 @@ repo-architecture-mcp --analyze-local /path/to/project
 }
 ```
 
-**User Configuration for GitHub** (`~/.kiro/settings/mcp.json`):
+**User Configuration for GitHub** (`~/.cursor/settings/mcp.json`):
 ```json
 {
   "mcpServers": {
@@ -148,6 +148,10 @@ repo-architecture-mcp --analyze-local /path/to/project
   }
 }
 ```
+
+### For GitHub Copilot Chat
+
+This MCP server integrates seamlessly with GitHub Copilot Chat to provide architectural insights directly in your development workflow. Use the available tools through Copilot's chat interface to analyze repositories and generate diagrams.
 
 ### Available Tools
 
