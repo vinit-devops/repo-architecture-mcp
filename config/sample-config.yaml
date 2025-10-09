@@ -1,0 +1,70 @@
+# Sample configuration file for Repository Architecture MCP Server
+# Copy this file and modify as needed
+
+# GitHub Authentication
+github_token: null  # Set via environment variable GITHUB_TOKEN
+
+# Performance Settings
+max_workers: 4
+memory_limit_mb: 2048
+parallel_processing: true
+
+# Caching
+cache_enabled: true
+cache_ttl_hours: 24
+cache_directory: null  # Uses system temp directory if null
+
+# Analysis Settings
+max_depth: 10
+max_nodes: 100
+output_format: "mermaid"  # mermaid, plantuml, svg, png
+output_directory: "./output"
+
+# Logging
+log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_format: "simple"  # simple, detailed, json
+log_file: null  # Logs to console if null
+
+# Server Settings
+transport: "stdio"
+timeout_seconds: 300
+
+# Language Parser Settings
+supported_languages:
+  - "Python"
+  - "JavaScript" 
+  - "TypeScript"
+  - "Java"
+  - "Go"
+
+# Diagram Generation Settings
+diagram_settings:
+  dependency_diagram:
+    include_external: true
+    layout: "hierarchical"  # hierarchical, circular, force-directed
+    max_depth: 5
+    
+  class_diagram:
+    show_attributes: true
+    show_methods: true
+    show_parameters: false
+    group_by_package: true
+    inheritance_depth: 5
+    
+  data_flow_diagram:
+    show_external_entities: true
+    show_data_stores: true
+    max_levels: 3
+
+# Resource Limits
+limits:
+  max_file_size_mb: 10
+  max_files_per_repo: 1000
+  max_analysis_time_seconds: 600
+  max_memory_per_analysis_mb: 1024
+
+# Error Handling
+error_handling:
+  continue_on_parse_errors: true
+  max_parse_errors: 50
+  graceful_degradation: true
