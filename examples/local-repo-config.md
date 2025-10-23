@@ -17,7 +17,7 @@ For analyzing local repositories (without needing GitHub tokens), you can use th
       ],
       "disabled": false,
       "autoApprove": [
-        "analyze_local_repository",
+        "analyze_repository",
         "get_repository_summary"
       ]
     }
@@ -37,7 +37,7 @@ For analyzing local repositories (without needing GitHub tokens), you can use th
       "cwd": "${workspaceFolder}",
       "disabled": false,
       "autoApprove": [
-        "analyze_local_repository",
+        "analyze_repository",
         "generate_dependency_diagram",
         "get_repository_summary"
       ]
@@ -49,16 +49,10 @@ For analyzing local repositories (without needing GitHub tokens), you can use th
 ## Usage Examples
 
 ### Analyze Current Directory
-```bash
-# The server can analyze the current working directory
-repo-architecture-mcp --analyze-local .
-```
+When using the MCP server, you can analyze local repositories by providing local paths instead of GitHub URLs to any of the analysis tools.
 
 ### Analyze Specific Local Path
-```bash
-# Analyze a specific local repository
-repo-architecture-mcp --analyze-local /path/to/your/project
-```
+All MCP tools (`analyze_repository`, `generate_dependency_diagram`, `generate_class_diagram`, etc.) now accept local paths in addition to GitHub URLs.
 
 ### MCP Tool Calls for Local Repositories
 
@@ -209,21 +203,67 @@ export LOG_LEVEL=INFO
 export REPO_ARCH_MAX_WORKERS=4
 ```
 
-## Command Line Usage for Local Repositories
+## MCP Tool Usage for Local Repositories
 
-```bash
-# Analyze current directory
-repo-architecture-mcp --analyze-local .
+All MCP tools now accept local paths. Simply use a local path instead of a GitHub URL:
 
-# Analyze with specific output format
-repo-architecture-mcp --analyze-local . --output-format svg
+```json
+// Analyze current directory
+{"tool": "analyze_repository", "arguments": {"url": "."}}
 
-# Analyze with custom output directory
-repo-architecture-mcp --analyze-local . --output-dir ./diagrams
+// Generate dependency diagram for local repo
+{"tool": "generate_dependency_diagram", "arguments": {"url": "/path/to/project", "format": "svg"}}
 
-# Analyze with debug logging
-repo-architecture-mcp --analyze-local . --log-level DEBUG
+// Get summary of local repository
+{"tool": "get_repository_summary", "arguments": {"url": "./my-project"}}
 ```
+
+### File Saving Feature
+
+All diagram generation tools support automatic file saving:
+
+```json
+// Save diagram to auto-generated filename
+{
+  "tool": "generate_dependency_diagram", 
+  "arguments": {
+    "url": ".", 
+    "format": "mermaid",
+    "save_to_file": true
+  }
+}
+
+// Save diagram to custom path
+{
+  "tool": "generate_class_diagram",
+  "arguments": {
+    "url": "./src",
+    "format": "svg", 
+    "save_to_file": true,
+    "output_path": "./docs/diagrams/classes.svg"
+  }
+}
+
+// Save data flow diagram
+{
+  "tool": "generate_data_flow_diagram",
+  "arguments": {
+    "url": ".",
+    "format": "png",
+    "save_to_file": true,
+    "output_path": "~/Desktop/dataflow.png"
+  }
+}
+```
+
+**File Naming Convention:**
+When `output_path` is not specified, files are auto-generated with the format:
+`{repo_name}_{diagram_type}_{timestamp}.{extension}`
+
+**Supported Extensions:**
+- Mermaid: `.mmd`
+- SVG: `.svg`
+- PNG: `.png`
 
 ## Integration with IDEs
 

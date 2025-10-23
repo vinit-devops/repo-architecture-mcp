@@ -92,11 +92,45 @@ repo-architecture-mcp --log-level DEBUG
 
 ### Available MCP Tools
 
+All tools work with both GitHub URLs and local repository paths:
+
 - `analyze_repository`: Analyze repository structure (GitHub URL or local path)
 - `generate_dependency_diagram`: Create dependency visualization
 - `generate_class_diagram`: Create class relationship diagram
 - `generate_data_flow_diagram`: Create data flow visualization
 - `get_repository_summary`: Get high-level repository statistics
+
+**Local Path Examples:**
+- Current directory: `"url": "."`
+- Relative path: `"url": "./my-project"`
+- Absolute path: `"url": "/home/user/project"`
+- Home directory: `"url": "~/projects/app"`
+
+**File Saving Feature:**
+All diagram generation tools now support automatic file saving:
+- `save_to_file`: Set to `true` to save diagrams to files
+- `output_path`: Optional custom file path (auto-generates if not provided)
+
+**Example with file saving:**
+```json
+{
+  "tool": "generate_dependency_diagram",
+  "arguments": {
+    "url": ".",
+    "format": "mermaid",
+    "save_to_file": true,
+    "output_path": "./diagrams/dependencies.mmd"
+  }
+}
+```
+
+**Diagram Quality Improvements:**
+- ✅ **Proper Mermaid syntax**: All generated diagrams use valid Mermaid syntax
+- ✅ **Markdown code blocks**: Diagrams are wrapped in proper markdown code blocks for better display
+- ✅ **Character sanitization**: Special characters in node names are properly handled
+- ✅ **Clean display names**: Node labels are cleaned for better readability
+- ✅ **Edge limiting**: Automatically limits edges to prevent Mermaid rendering issues (default: 400 edges)
+- ✅ **Smart prioritization**: Most important relationships are preserved when limiting edges
 
 ### Local Repository Analysis
 

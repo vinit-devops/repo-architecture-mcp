@@ -86,6 +86,67 @@ class RepoArchitectureMCPServer:
             for f in sorted_files[:5]  # Top 5 largest files
         ]
     
+    async def _save_diagram_to_file(
+        self, 
+        content: str, 
+        format: str, 
+        output_path: Optional[str], 
+        diagram_type: str,
+        repo_name: str
+    ) -> str:
+        """Save diagram content to a file.
+        
+        Args:
+            content: Diagram content to save
+            format: Output format (mermaid, svg, png)
+            output_path: Custom output path (optional)
+            diagram_type: Type of diagram (dependency, class, etc.)
+            repo_name: Repository name for auto-generated filename
+            
+        Returns:
+            Path to the saved file
+        """
+        import os
+        from pathlib import Path
+        from datetime import datetime
+        
+        try:
+            # Determine file extension
+            extension_map = {
+                "mermaid": ".mmd",
+                "svg": ".svg", 
+                "png": ".png"
+            }
+            extension = extension_map.get(format, ".txt")
+            
+            # Generate filename if not provided
+            if output_path is None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{repo_name}_{diagram_type}_{timestamp}{extension}"
+                output_path = os.path.join(os.getcwd(), filename)
+            else:
+                # Ensure the output path has the correct extension
+                output_path = Path(output_path)
+                if not output_path.suffix:
+                    output_path = output_path.with_suffix(extension)
+                output_path = str(output_path)
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+            
+            # Write content to file
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            logger.info(f"Diagram saved to file: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Failed to save diagram to file: {e}")
+            # Return None to indicate failure, but don't raise exception
+            # so the main operation can still succeed
+            return None
+    
     def get_available_tools(self) -> List[str]:
         """Get list of available MCP tools."""
         return [
@@ -121,13 +182,12 @@ class RepoArchitectureMCPServer:
     def _register_tools(self) -> None:
         """Register all available MCP tools."""
         
-        @self._handle_tool_errors
-        async def analyze_repository(url: str, token: Optional[str] = None) -> Dict[str, Any]:
-            """Analyze a GitHub repository structure.
+        async def analyze_repository(url: str = ".", token: Optional[str] = None) -> Dict[str, Any]:
+            """Analyze a repository structure from GitHub URL or local path.
             
             Args:
-                url: GitHub repository URL
-                token: Optional GitHub authentication token
+                url: GitHub repository URL or local repository path (defaults to current directory ".")
+                token: Optional GitHub authentication token (only used for GitHub repos)
                 
             Returns:
                 Repository analysis results as structured JSON
@@ -276,28 +336,33 @@ class RepoArchitectureMCPServer:
         
         self.server.add_tool(analyze_repository)
         
-        @self._handle_tool_errors
         async def generate_dependency_diagram(
-            url: str, 
+            url: str = ".", 
             format: str = "mermaid",
             token: Optional[str] = None,
             include_external: bool = True,
             max_depth: int = 10,
             layout: str = "hierarchical",
             filter_patterns: Optional[List[str]] = None,
-            exclude_patterns: Optional[List[str]] = None
+            exclude_patterns: Optional[List[str]] = None,
+            save_to_file: bool = False,
+            output_path: Optional[str] = None,
+            max_edges: int = 400
         ) -> Dict[str, Any]:
             """Generate dependency diagram from repository analysis.
             
             Args:
-                url: GitHub repository URL
+                url: GitHub repository URL or local repository path (defaults to current directory ".")
                 format: Output format (mermaid, svg, png)
-                token: Optional GitHub authentication token
+                token: Optional GitHub authentication token (only used for GitHub repos)
                 include_external: Include external dependencies
                 max_depth: Maximum dependency depth
                 layout: Diagram layout (hierarchical, circular, force-directed)
                 filter_patterns: List of regex patterns to include
                 exclude_patterns: List of regex patterns to exclude
+                save_to_file: Whether to save the diagram to a file
+                output_path: Custom output file path (if not provided, auto-generates)
+                max_edges: Maximum number of edges to prevent Mermaid rendering issues
                 
             Returns:
                 Generated dependency diagram with metadata
@@ -310,7 +375,7 @@ class RepoArchitectureMCPServer:
             from datetime import datetime
             
             # Validate inputs
-            ErrorHandler.validate_github_url(url)
+            ErrorHandler.validate_repository_path(url)
             ErrorHandler.validate_format(format, ["mermaid", "svg", "png"])
             ErrorHandler.validate_positive_integer(max_depth, "max_depth", max_value=20)
             
@@ -374,6 +439,7 @@ class RepoArchitectureMCPServer:
                     title=f"Dependency Diagram - {repo_info.get('name', 'Repository')}",
                     include_external=include_external,
                     max_nodes=min(max_depth * 10, 100),  # Reasonable limit based on depth
+                    max_edges=max_edges,
                     layout=layout,
                     filter_patterns=filter_patterns or [],
                     exclude_patterns=exclude_patterns or []
@@ -384,6 +450,17 @@ class RepoArchitectureMCPServer:
                 diagram_output = await diagram_generator.generate_dependency_diagram(
                     dependency_graph, config
                 )
+                
+                # Save to file if requested
+                saved_file_path = None
+                if save_to_file:
+                    saved_file_path = await self._save_diagram_to_file(
+                        diagram_output.content, 
+                        format, 
+                        output_path, 
+                        "dependency_diagram",
+                        repo_info.get('name', 'repository')
+                    )
                 
                 # Calculate diagram statistics
                 total_nodes = dependency_graph.number_of_nodes()
@@ -400,9 +477,10 @@ class RepoArchitectureMCPServer:
                     "diagram": {
                         "content": diagram_output.content,
                         "format": format,
-                            "title": config.title,
-                            "layout": layout
-                        },
+                        "title": config.title,
+                        "layout": layout,
+                        "saved_to_file": saved_file_path
+                    },
                         "metadata": {
                             "timestamp": datetime.utcnow().isoformat() + "Z",
                             "repository_url": url,
@@ -423,7 +501,8 @@ class RepoArchitectureMCPServer:
                             "max_depth": max_depth,
                             "layout": layout,
                             "filter_patterns": filter_patterns,
-                            "exclude_patterns": exclude_patterns
+                            "exclude_patterns": exclude_patterns,
+                            "save_to_file": save_to_file
                         }
                 }
                 
@@ -449,9 +528,8 @@ class RepoArchitectureMCPServer:
         
         self.server.add_tool(generate_dependency_diagram)
         
-        @self._handle_tool_errors
         async def generate_class_diagram(
-            url: str,
+            url: str = ".",
             format: str = "mermaid", 
             token: Optional[str] = None,
             package_filter: Optional[str] = None,
@@ -459,20 +537,26 @@ class RepoArchitectureMCPServer:
             show_attributes: bool = True,
             show_methods: bool = True,
             show_parameters: bool = False,
-            group_by_package: bool = True
+            group_by_package: bool = True,
+            save_to_file: bool = False,
+            output_path: Optional[str] = None,
+            max_edges: int = 400
         ) -> Dict[str, Any]:
             """Generate UML class diagram from repository analysis.
             
             Args:
-                url: GitHub repository URL
+                url: GitHub repository URL or local repository path (defaults to current directory ".")
                 format: Output format (mermaid, svg, png)
-                token: Optional GitHub authentication token
+                token: Optional GitHub authentication token (only used for GitHub repos)
                 package_filter: Filter by package/namespace pattern (regex)
                 inheritance_depth: Maximum inheritance depth to show
                 show_attributes: Include class attributes in diagram
                 show_methods: Include class methods in diagram
                 show_parameters: Include method parameters in diagram
                 group_by_package: Group classes by package/namespace
+                save_to_file: Whether to save the diagram to a file
+                output_path: Custom output file path (if not provided, auto-generates)
+                max_edges: Maximum number of edges to prevent Mermaid rendering issues
                 
             Returns:
                 Generated class diagram with metadata
@@ -487,24 +571,17 @@ class RepoArchitectureMCPServer:
                 import re
                 
                 # Validate inputs
-                if not url or not isinstance(url, str):
-                    raise ValueError("Repository URL must be a non-empty string")
+                ErrorHandler.validate_repository_path(url)
                 
-                if not url.startswith(('https://github.com/', 'http://github.com/', 'github.com/')):
-                    raise ValueError("URL must be a valid GitHub repository URL")
-                
-                # Normalize URL
+                # Normalize URL if it's a GitHub URL
                 if url.startswith('github.com/'):
                     url = f"https://{url}"
                 
                 # Validate format
-                valid_formats = ["mermaid", "svg", "png"]
-                if format not in valid_formats:
-                    raise ValueError(f"Format must be one of: {', '.join(valid_formats)}")
+                ErrorHandler.validate_format(format, ["mermaid", "svg", "png"])
                 
                 # Validate inheritance depth
-                if inheritance_depth < 1 or inheritance_depth > 20:
-                    raise ValueError("Inheritance depth must be between 1 and 20")
+                ErrorHandler.validate_positive_integer(inheritance_depth, "inheritance_depth", max_value=20)
                 
                 logger.info(f"Generating class diagram for: {url} in {format} format")
                 
@@ -592,6 +669,7 @@ class RepoArchitectureMCPServer:
                         title=f"Class Diagram - {repo_info.get('name', 'Repository')}",
                         include_external=True,
                         max_nodes=min(len(class_diagram.classes), 50),  # Reasonable limit
+                        max_edges=max_edges,
                         show_attributes=show_attributes,
                         show_methods=show_methods,
                         show_parameters=show_parameters,
@@ -603,6 +681,17 @@ class RepoArchitectureMCPServer:
                     diagram_output = await diagram_generator.generate_class_diagram(
                         class_diagram, config
                     )
+                    
+                    # Save to file if requested
+                    saved_file_path = None
+                    if save_to_file:
+                        saved_file_path = await self._save_diagram_to_file(
+                            diagram_output.content, 
+                            format, 
+                            output_path, 
+                            "class_diagram",
+                            repo_info.get('name', 'repository')
+                        )
                     
                     # Calculate diagram statistics
                     total_classes_in_diagram = len(class_diagram.classes)
@@ -625,7 +714,8 @@ class RepoArchitectureMCPServer:
                         "diagram": {
                             "content": diagram_output.content,
                             "format": format,
-                            "title": config.title
+                            "title": config.title,
+                            "saved_to_file": saved_file_path
                         },
                         "metadata": {
                             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -648,7 +738,8 @@ class RepoArchitectureMCPServer:
                             "show_attributes": show_attributes,
                             "show_methods": show_methods,
                             "show_parameters": show_parameters,
-                            "group_by_package": group_by_package
+                            "group_by_package": group_by_package,
+                            "save_to_file": save_to_file
                         }
                     }
                     
@@ -675,24 +766,30 @@ class RepoArchitectureMCPServer:
         self.server.add_tool(generate_class_diagram)
         
         async def generate_data_flow_diagram(
-            url: str,
+            url: str = ".",
             format: str = "mermaid",
             token: Optional[str] = None,
             dfd_level: int = 0,
             layout: str = "hierarchical",
             filter_patterns: Optional[List[str]] = None,
-            exclude_patterns: Optional[List[str]] = None
+            exclude_patterns: Optional[List[str]] = None,
+            save_to_file: bool = False,
+            output_path: Optional[str] = None,
+            max_edges: int = 400
         ) -> Dict[str, Any]:
             """Generate data flow diagram from repository analysis.
             
             Args:
-                url: GitHub repository URL
+                url: GitHub repository URL or local repository path (defaults to current directory ".")
                 format: Output format (mermaid, svg, png)
-                token: Optional GitHub authentication token
+                token: Optional GitHub authentication token (only used for GitHub repos)
                 dfd_level: DFD level (0=context, 1=level 1, etc.)
                 layout: Diagram layout (hierarchical, circular, force-directed)
                 filter_patterns: List of regex patterns to include
                 exclude_patterns: List of regex patterns to exclude
+                save_to_file: Whether to save the diagram to a file
+                output_path: Custom output file path (if not provided, auto-generates)
+                max_edges: Maximum number of edges to prevent Mermaid rendering issues
                 
             Returns:
                 Generated data flow diagram with metadata
@@ -706,20 +803,14 @@ class RepoArchitectureMCPServer:
                 from datetime import datetime
                 
                 # Validate inputs
-                if not url or not isinstance(url, str):
-                    raise ValueError("Repository URL must be a non-empty string")
+                ErrorHandler.validate_repository_path(url)
                 
-                if not url.startswith(('https://github.com/', 'http://github.com/', 'github.com/')):
-                    raise ValueError("URL must be a valid GitHub repository URL")
-                
-                # Normalize URL
+                # Normalize URL if it's a GitHub URL
                 if url.startswith('github.com/'):
                     url = f"https://{url}"
                 
                 # Validate format
-                valid_formats = ["mermaid", "svg", "png"]
-                if format not in valid_formats:
-                    raise ValueError(f"Format must be one of: {', '.join(valid_formats)}")
+                ErrorHandler.validate_format(format, ["mermaid", "svg", "png"])
                 
                 # Validate DFD level
                 if dfd_level < 0 or dfd_level > 3:
@@ -810,6 +901,7 @@ class RepoArchitectureMCPServer:
                         title=f"{level_names.get(dfd_level, f'Level {dfd_level} DFD')} - {repo_info.get('name', 'Repository')}",
                         include_external=True,
                         max_nodes=50,  # Reasonable limit for DFD
+                        max_edges=max_edges,
                         layout=layout,
                         filter_patterns=filter_patterns or [],
                         exclude_patterns=exclude_patterns or []
@@ -820,6 +912,17 @@ class RepoArchitectureMCPServer:
                     diagram_output = await diagram_generator.generate_data_flow_diagram(
                         data_flow_diagram, config
                     )
+                    
+                    # Save to file if requested
+                    saved_file_path = None
+                    if save_to_file:
+                        saved_file_path = await self._save_diagram_to_file(
+                            diagram_output.content, 
+                            format, 
+                            output_path, 
+                            "data_flow_diagram",
+                            repo_info.get('name', 'repository')
+                        )
                     
                     # Calculate diagram statistics
                     total_processes = len(data_flow_diagram.processes)
@@ -840,7 +943,8 @@ class RepoArchitectureMCPServer:
                             "format": format,
                             "title": config.title,
                             "dfd_level": dfd_level,
-                            "layout": layout
+                            "layout": layout,
+                            "saved_to_file": saved_file_path
                         },
                         "metadata": {
                             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -860,7 +964,8 @@ class RepoArchitectureMCPServer:
                             "dfd_level": dfd_level,
                             "layout": layout,
                             "filter_patterns": filter_patterns,
-                            "exclude_patterns": exclude_patterns
+                            "exclude_patterns": exclude_patterns,
+                            "save_to_file": save_to_file
                         },
                         "dfd_explanation": {
                             "level_description": self._get_dfd_level_description(dfd_level),
@@ -891,15 +996,15 @@ class RepoArchitectureMCPServer:
         self.server.add_tool(generate_data_flow_diagram)
         
         async def get_repository_summary(
-            url: str,
+            url: str = ".",
             token: Optional[str] = None,
             include_caching_info: bool = True
         ) -> Dict[str, Any]:
             """Get high-level repository statistics and summary.
             
             Args:
-                url: GitHub repository URL
-                token: Optional GitHub authentication token
+                url: GitHub repository URL or local repository path (defaults to current directory ".")
+                token: Optional GitHub authentication token (only used for GitHub repos)
                 include_caching_info: Include caching and analysis timestamps
                 
             Returns:
@@ -914,13 +1019,9 @@ class RepoArchitectureMCPServer:
                 import os
                 
                 # Validate inputs
-                if not url or not isinstance(url, str):
-                    raise ValueError("Repository URL must be a non-empty string")
+                ErrorHandler.validate_repository_path(url)
                 
-                if not url.startswith(('https://github.com/', 'http://github.com/', 'github.com/')):
-                    raise ValueError("URL must be a valid GitHub repository URL")
-                
-                # Normalize URL
+                # Normalize URL if it's a GitHub URL
                 if url.startswith('github.com/'):
                     url = f"https://{url}"
                 

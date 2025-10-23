@@ -63,6 +63,7 @@ class DiagramConfig:
     title: Optional[str] = None
     include_external: bool = True
     max_nodes: int = 50
+    max_edges: int = 400  # Limit edges to prevent Mermaid rendering issues
     layout: str = "hierarchical"  # hierarchical, circular, force-directed
     filter_patterns: List[str] = field(default_factory=list)
     exclude_patterns: List[str] = field(default_factory=list)
@@ -82,6 +83,7 @@ class DiagramConfig:
             "title": self.title,
             "include_external": self.include_external,
             "max_nodes": self.max_nodes,
+            "max_edges": self.max_edges,
             "layout": self.layout,
             "filter_patterns": self.filter_patterns,
             "exclude_patterns": self.exclude_patterns,
@@ -181,12 +183,13 @@ class MermaidRenderer(DiagramRenderer):
                         lines.append(f"    {self._sanitize_id(node)}[{label}]:::internal")
         
         # Add edges with relationship-specific styling
-        self._add_dependency_edges(lines, graph, filtered_nodes)
+        self._add_dependency_edges(lines, graph, filtered_nodes, config.max_edges)
         
         # Add styling classes
         self._add_dependency_styling(lines)
         
-        return "\n".join(lines)
+        mermaid_content = "\n".join(lines)
+        return self._wrap_in_markdown_code_block(mermaid_content, "mermaid")
     
     async def _render_circular_dependency_diagram(self, graph: nx.DiGraph, config: DiagramConfig) -> str:
         """Render dependency diagram with circular layout for highlighting cycles."""
@@ -229,7 +232,7 @@ class MermaidRenderer(DiagramRenderer):
                 lines.append(f"    {self._sanitize_id(node)}[{label}]:::internal")
         
         # Add edges
-        self._add_dependency_edges(lines, graph, filtered_nodes)
+        self._add_dependency_edges(lines, graph, filtered_nodes, config.max_edges)
         
         # Add styling with circular component highlighting
         lines.extend([
@@ -239,7 +242,8 @@ class MermaidRenderer(DiagramRenderer):
             "    classDef circular fill:#ffcc99,stroke:#ff9900,stroke-width:3px"
         ])
         
-        return "\n".join(lines)
+        mermaid_content = "\n".join(lines)
+        return self._wrap_in_markdown_code_block(mermaid_content, "mermaid")
     
     async def _render_force_directed_dependency_diagram(self, graph: nx.DiGraph, config: DiagramConfig) -> str:
         """Render dependency diagram optimized for force-directed layout."""
@@ -275,7 +279,7 @@ class MermaidRenderer(DiagramRenderer):
             lines.append(f"    {self._sanitize_id(node)}[{label}]:::{style_class}")
         
         # Add edges with strength-based styling
-        self._add_dependency_edges(lines, graph, filtered_nodes)
+        self._add_dependency_edges(lines, graph, filtered_nodes, config.max_edges)
         
         # Add styling for force-directed layout
         lines.extend([
@@ -285,7 +289,8 @@ class MermaidRenderer(DiagramRenderer):
             "    classDef hub fill:#ccccff,stroke:#6666ff,stroke-width:4px"
         ])
         
-        return "\n".join(lines)
+        mermaid_content = "\n".join(lines)
+        return self._wrap_in_markdown_code_block(mermaid_content, "mermaid")
     
     def _group_nodes_by_package(self, nodes: List[str], config: DiagramConfig) -> Dict[str, List[str]]:
         """Group nodes by package for hierarchical display."""
@@ -305,8 +310,10 @@ class MermaidRenderer(DiagramRenderer):
         
         return groups
     
-    def _add_dependency_edges(self, lines: List[str], graph: nx.DiGraph, filtered_nodes: List[str]) -> None:
-        """Add dependency edges with appropriate styling."""
+    def _add_dependency_edges(self, lines: List[str], graph: nx.DiGraph, filtered_nodes: List[str], max_edges: int = 400) -> None:
+        """Add dependency edges with appropriate styling, limiting to prevent Mermaid edge limit issues."""
+        # Get all valid edges
+        valid_edges = []
         for source, target in graph.edges():
             if source in filtered_nodes and target in filtered_nodes:
                 edge_data = graph.edges[source, target]
@@ -314,18 +321,71 @@ class MermaidRenderer(DiagramRenderer):
                 relation_type = edge_data.get('relation_type', 'dependency')
                 is_external = edge_data.get('external', False)
                 
-                # Create edge with appropriate styling
-                edge_style = self._get_dependency_edge_style(relation_type, strength, is_external)
+                # Calculate edge importance for prioritization
+                importance = self._calculate_edge_importance(strength, relation_type, is_external)
                 
-                # Add edge label for important relationships
-                if strength > 2 or relation_type == 'inheritance':
-                    label = self._get_edge_label(relation_type, edge_data)
-                    if label:
-                        lines.append(f"    {self._sanitize_id(source)} {edge_style}|{label}| {self._sanitize_id(target)}")
-                    else:
-                        lines.append(f"    {self._sanitize_id(source)} {edge_style} {self._sanitize_id(target)}")
+                valid_edges.append({
+                    'source': source,
+                    'target': target,
+                    'edge_data': edge_data,
+                    'strength': strength,
+                    'relation_type': relation_type,
+                    'is_external': is_external,
+                    'importance': importance
+                })
+        
+        # Sort edges by importance (highest first)
+        valid_edges.sort(key=lambda x: x['importance'], reverse=True)
+        
+        # Limit edges to prevent Mermaid issues
+        if len(valid_edges) > max_edges:
+            logger.warning(f"Limiting edges from {len(valid_edges)} to {max_edges} to prevent Mermaid rendering issues")
+            valid_edges = valid_edges[:max_edges]
+        
+        # Add edges to diagram
+        for edge in valid_edges:
+            source = edge['source']
+            target = edge['target']
+            strength = edge['strength']
+            relation_type = edge['relation_type']
+            is_external = edge['is_external']
+            edge_data = edge['edge_data']
+            
+            # Create edge with appropriate styling
+            edge_style = self._get_dependency_edge_style(relation_type, strength, is_external)
+            
+            # Add edge label for important relationships
+            if strength > 2 or relation_type == 'inheritance':
+                label = self._get_edge_label(relation_type, edge_data)
+                if label:
+                    lines.append(f"    {self._sanitize_id(source)} {edge_style}|{label}| {self._sanitize_id(target)}")
                 else:
                     lines.append(f"    {self._sanitize_id(source)} {edge_style} {self._sanitize_id(target)}")
+            else:
+                lines.append(f"    {self._sanitize_id(source)} {edge_style} {self._sanitize_id(target)}")
+        
+        # Add note if edges were limited
+        if len(graph.edges()) > max_edges:
+            lines.append("")
+            lines.append(f"    %% Note: Showing top {max_edges} most important dependencies out of {len(graph.edges())} total")
+    
+    def _calculate_edge_importance(self, strength: int, relation_type: str, is_external: bool) -> int:
+        """Calculate the importance score of an edge for prioritization."""
+        importance = strength * 10  # Base importance from strength
+        
+        # Boost importance for specific relationship types
+        if relation_type == 'inheritance':
+            importance += 50  # Inheritance is very important
+        elif relation_type == 'composition':
+            importance += 30  # Composition is important
+        elif relation_type == 'import':
+            importance += 10  # Imports are moderately important
+        
+        # External dependencies are less important for internal architecture
+        if is_external:
+            importance -= 20
+        
+        return max(importance, 1)  # Ensure minimum importance of 1
     
     def _get_dependency_edge_style(self, relation_type: str, strength: int, is_external: bool) -> str:
         """Get edge style for dependency relationships."""
@@ -392,6 +452,17 @@ class MermaidRenderer(DiagramRenderer):
         
         # Add relationships with proper UML notation
         filtered_relationships = self._filter_relationships(class_diagram.relationships, filtered_classes)
+        
+        # Limit relationships to prevent Mermaid edge limit issues
+        if len(filtered_relationships) > config.max_edges:
+            logger.warning(f"Limiting class relationships from {len(filtered_relationships)} to {config.max_edges} to prevent Mermaid rendering issues")
+            # Prioritize inheritance and composition relationships
+            prioritized_relationships = sorted(filtered_relationships, 
+                                             key=lambda r: self._get_relationship_priority(r.relationship_type), 
+                                             reverse=True)
+            filtered_relationships = prioritized_relationships[:config.max_edges]
+            lines.append(f"    %% Note: Showing top {config.max_edges} most important relationships out of {len(class_diagram.relationships)} total")
+        
         for relationship in filtered_relationships:
             lines.append(self._render_class_relationship(relationship))
         
@@ -402,7 +473,8 @@ class MermaidRenderer(DiagramRenderer):
         # Add styling for different class types
         lines.extend(self._get_class_diagram_styling())
         
-        return "\n".join(lines)
+        mermaid_content = "\n".join(lines)
+        return self._wrap_in_markdown_code_block(mermaid_content, "mermaid")
     
     def _filter_classes(self, class_diagram: ClassDiagram, config: DiagramConfig) -> List[str]:
         """Filter classes based on configuration."""
@@ -486,6 +558,18 @@ class MermaidRenderer(DiagramRenderer):
         return [rel for rel in relationships 
                 if rel.source_class in filtered_classes and rel.target_class in filtered_classes]
     
+    def _get_relationship_priority(self, relationship_type: str) -> int:
+        """Get priority score for relationship types (higher = more important)."""
+        priority_map = {
+            'inheritance': 100,    # Most important - shows class hierarchy
+            'composition': 80,     # Very important - strong ownership
+            'aggregation': 60,     # Important - weak ownership  
+            'dependency': 40,      # Moderately important
+            'association': 20,     # Less important
+            'realization': 90      # Very important - interface implementation
+        }
+        return priority_map.get(relationship_type, 10)
+    
     async def render_data_flow_diagram(self, dfd: DataFlowDiagram, config: DiagramConfig) -> str:
         """Render a data flow diagram using standard DFD notation in Mermaid syntax."""
         logger.info("Rendering data flow diagram in Mermaid format")
@@ -513,12 +597,25 @@ class MermaidRenderer(DiagramRenderer):
         
         # Add data flows with descriptive labels
         filtered_flows = self._filter_dfd_flows(dfd.flows, filtered_nodes)
-        self._render_dfd_flows(lines, filtered_flows)
+        
+        # Limit flows to prevent Mermaid edge limit issues
+        if len(filtered_flows) > config.max_edges:
+            logger.warning(f"Limiting data flows from {len(filtered_flows)} to {config.max_edges} to prevent Mermaid rendering issues")
+            # Prioritize flows by importance (control flows, then data flows)
+            prioritized_flows = sorted(filtered_flows, 
+                                     key=lambda f: self._get_flow_priority(f), 
+                                     reverse=True)
+            filtered_flows = prioritized_flows[:config.max_edges]
+        
+        self._render_dfd_flows(lines, filtered_flows, len(dfd.flows) if len(dfd.flows) > config.max_edges else None)
         
         # Add DFD-specific styling
         lines.extend(self._get_dfd_styling())
         
-        return "\n".join(lines)
+        mermaid_content = "\n".join(lines)
+        
+        # Wrap in markdown code block for better display
+        return self._wrap_in_markdown_code_block(mermaid_content, "mermaid")
     
     def _filter_dfd_nodes(self, dfd: DataFlowDiagram, config: DiagramConfig) -> List[str]:
         """Filter DFD nodes based on configuration."""
@@ -612,9 +709,9 @@ class MermaidRenderer(DiagramRenderer):
         
         # Add node type prefix for clarity
         if node_info.node_type == 'external_entity':
-            prefix = "EXT: "
+            prefix = "EXT "
         elif node_info.node_type == 'data_store':
-            prefix = "DS: "
+            prefix = "DS "
         else:
             prefix = ""
         
@@ -623,21 +720,28 @@ class MermaidRenderer(DiagramRenderer):
         # Add description if available and short
         if hasattr(node_info, 'description') and node_info.description:
             desc = node_info.description
-            if len(desc) < 20:
-                display_name += f"\\n{desc}"
+            if len(desc) < 15:
+                display_name += f" - {desc}"
         
         # Truncate very long names
-        if len(display_name) > 40:
-            display_name = display_name[:37] + "..."
+        if len(display_name) > 35:
+            display_name = display_name[:32] + "..."
+        
+        # Sanitize display name for Mermaid - remove problematic characters
+        display_name = display_name.replace('(', '').replace(')', '').replace(':', ' ').replace('[', '').replace(']', '')
         
         return display_name
+    
+    def _wrap_in_markdown_code_block(self, content: str, language: str = "mermaid") -> str:
+        """Wrap diagram content in markdown code block for better display."""
+        return f"```{language}\n{content}\n```"
     
     def _filter_dfd_flows(self, flows: List, filtered_nodes: List[str]) -> List:
         """Filter data flows to only include those between filtered nodes."""
         return [flow for flow in flows 
                 if flow.source in filtered_nodes and flow.target in filtered_nodes]
     
-    def _render_dfd_flows(self, lines: List[str], flows: List) -> None:
+    def _render_dfd_flows(self, lines: List[str], flows: List, total_flows: Optional[int] = None) -> None:
         """Render data flows with descriptive labels."""
         if flows:
             lines.append("")
@@ -665,6 +769,30 @@ class MermaidRenderer(DiagramRenderer):
                     lines.append(f"    {source} {arrow_style}{flow_label}| {target}")
                 else:
                     lines.append(f"    {source} --> {target}")
+            
+            # Add note if flows were limited
+            if total_flows:
+                lines.append("")
+                lines.append(f"    %% Note: Showing top {len(flows)} most important flows out of {total_flows} total")
+    
+    def _get_flow_priority(self, flow) -> int:
+        """Get priority score for data flows (higher = more important)."""
+        priority = 10  # Base priority
+        
+        # Boost priority based on flow type
+        if hasattr(flow, 'flow_type'):
+            if flow.flow_type == 'control':
+                priority += 50  # Control flows are most important
+            elif flow.flow_type == 'event':
+                priority += 30  # Event flows are important
+            else:
+                priority += 10  # Data flows are moderately important
+        
+        # Boost priority if flow has description
+        if hasattr(flow, 'data_description') and flow.data_description:
+            priority += 20
+        
+        return priority
     
     def _get_dfd_flow_label(self, flow) -> str:
         """Get descriptive label for data flow."""
@@ -834,7 +962,17 @@ class MermaidRenderer(DiagramRenderer):
     def _sanitize_id(self, identifier: str) -> str:
         """Sanitize identifier for Mermaid syntax."""
         # Replace dots and other special characters with underscores
-        return identifier.replace('.', '_').replace('-', '_').replace('/', '_')
+        import re
+        # Replace any non-alphanumeric characters (except underscores) with underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', identifier)
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        # Ensure it starts with a letter or underscore
+        if sanitized and not sanitized[0].isalpha() and sanitized[0] != '_':
+            sanitized = 'n_' + sanitized
+        return sanitized or 'node'
     
     def _get_edge_style(self, relation_type: str, strength: int) -> str:
         """Get edge style based on relationship type and strength."""
